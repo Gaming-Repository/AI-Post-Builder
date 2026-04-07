@@ -1,0 +1,17 @@
+{
+  "name": "ai-post-builder",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n client,server -c cyan,magenta \"pnpm --filter client dev\" \"pnpm --filter server dev\"",
+    "build": "pnpm --filter server build && pnpm --filter client build",
+    "check": "pnpm --filter server check && pnpm --filter client check",
+    "test": "pnpm --filter server test",
+    "start": "pnpm --filter server start",
+    "db:push": "pnpm --filter server db:push",
+    "db:studio": "pnpm --filter server db:studio"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

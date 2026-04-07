@@ -1,0 +1,32 @@
+[
+  {
+    "content": "Set up project foundation: pnpm init, install all dependencies (React 19, Vite, Express, tRPC, Drizzle, Anthropic, Tailwind 4, shadcn)",
+    "status": "completed",
+    "id": "1"
+  },
+  {
+    "content": "Create database schema (Drizzle ORM) + tRPC router with posts.generate, posts.regenerate, video.analyzeVideo, image.generateImage",
+    "status": "completed",
+    "id": "2"
+  },
+  {
+    "content": "Build frontend: PostBuilder main page, PostCard component, HistoryPanel modal with full platform/model/video support",
+    "status": "completed",
+    "id": "3"
+  },
+  {
+    "content": "Integrate Claude API: multi-model post generation, video frame analysis, structured JSON schema output, image generation stub",
+    "status": "completed",
+    "id": "4"
+  },
+  {
+    "content": "Write Vitest tests for platform configs, character limits, post generation, video analysis, metadata extraction",
+    "status": "completed",
+    "id": "5"
+  },
+  {
+    "content": "Create minimal README + LICENSE, commit everything, push to GitHub",
+    "status": "in_progress",
+    "id": "6"
+  }
+]
