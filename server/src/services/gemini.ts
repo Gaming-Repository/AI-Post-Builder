@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenAI } from '@google/genai';
 import { PLATFORM_CONFIGS, MODEL_CONFIGS, type ModelId } from '../config/platforms.js';
 import type { Platform } from '../db/schema.js';
 import type { PostMetadata, GeneratedPost, VideoAnalysis } from './ai.js';
@@ -6,14 +6,20 @@ import type { PostMetadata, GeneratedPost, VideoAnalysis } from './ai.js';
 export type { PostMetadata, GeneratedPost, VideoAnalysis };
 
 const getClient = () =>
-  new Anthropic({
+  new GoogleGenAI({
     apiKey:
-      process.env.WORKSH_ANTHROPIC_API_KEY ??
-      process.env.ANTHROPIC_API_KEY ??
+      process.env.GEMINI_WORKSHOP_API_KEY ??
+      process.env.GOOGLE_API_KEY ??
       '',
   });
 
-
+// Helper to extract JSON from text
+function extractJson(text: string): string {
+  const jsonMatch =
+    text.match(/```json\s*([\s\S]*?)\s*```/) ??
+    text.match(/```\s*([\s\S]*?)\s*```/);
+  return jsonMatch ? jsonMatch[1] : text.trim();
+}
 
 export async function generatePosts(params: {
   topic: string;
@@ -23,8 +29,6 @@ export async function generatePosts(params: {
   platforms: Platform[];
   model: ModelId;
   videoAnalysis?: VideoAnalysis;
-  // For unified interface compatibility
-  previousPosts?: GeneratedPost[];
 }): Promise<GeneratedPost[]> {
   const client = getClient();
   const modelConfig = MODEL_CONFIGS[params.model];
@@ -40,7 +44,9 @@ export async function generatePosts(params: {
     ? `\nVideo analysis context:\n- Description: ${params.videoAnalysis.description}\n- Key elements: ${params.videoAnalysis.keyElements.join(', ')}`
     : '';
 
-  const userPrompt = `Generate social media posts for the following platforms:
+  const systemInstruction = `You are an expert social media strategist. Generate platform-optimized posts in valid JSON format only. Never exceed platform character limits.`;
+
+  const prompt = `Generate social media posts for the following platforms:
 ${platformDetails}
 
 Topic: ${params.topic}
@@ -60,31 +66,25 @@ Return a JSON object with a "posts" array. Each post must have:
 - content: the post text
 - metadata: { sentiment, keyTopics[], callToAction, hashtags[], mentions[] }`;
 
-  const response = await client.messages.create({
+  const response = await client.models.generateContent({
     model: modelConfig.apiId,
-    max_tokens: 4096,
-    system: 'You are an expert social media strategist. Generate platform-optimized posts in valid JSON format only. Never exceed platform character limits.',
-    messages: [{ role: 'user', content: userPrompt }],
-    // @ts-expect-error – betas may not be typed yet
-    betas: ['output-128k-2025-02-19'],
+    contents: prompt,
+    config: {
+      systemInstruction,
+      maxOutputTokens: 4096,
+    },
   });
 
-  const textBlock = response.content.find((b) => b.type === 'text');
-  if (!textBlock || textBlock.type !== 'text') {
-    throw new Error('No text content in Claude response');
+  const text = response.text;
+  if (!text) {
+    throw new Error('No text in Gemini response');
   }
-
-  // Extract JSON from response (handle markdown code blocks)
-  const jsonMatch =
-    textBlock.text.match(/```json\s*([\s\S]*?)\s*```/) ??
-    textBlock.text.match(/```\s*([\s\S]*?)\s*```/);
-  const jsonStr = jsonMatch ? jsonMatch[1] : textBlock.text.trim();
 
   let parsed: { posts: Array<{ platform: string; content: string; metadata: PostMetadata }> };
   try {
-    parsed = JSON.parse(jsonStr);
+    parsed = JSON.parse(extractJson(text));
   } catch {
-    throw new Error(`Failed to parse Claude response as JSON: ${jsonStr.slice(0, 200)}`);
+    throw new Error(`Failed to parse Gemini response as JSON: ${text.slice(0, 200)}`);
   }
 
   return parsed.posts
@@ -134,49 +134,44 @@ export async function analyzeVideoFrames(params: {
   const client = getClient();
   const modelConfig = MODEL_CONFIGS[params.model];
 
-  const imageContent: Anthropic.ImageBlockParam[] = params.frames.map((frame) => ({
-    type: 'image',
-    source: {
-      type: 'base64',
-      media_type: 'image/jpeg',
-      data: frame.replace(/^data:image\/[a-z]+;base64,/, ''),
-    },
-  }));
+  // Fallback to gemini-pro if the specified model doesn't support vision
+  const visionModel = modelConfig.supportsVision ? modelConfig.apiId : 'gemini-2.5-pro-preview-05-06';
 
-  const response = await client.messages.create({
-    model: modelConfig.apiId,
-    max_tokens: 1024,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          ...imageContent,
-          {
-            type: 'text',
-            text: `${params.description ? `Context: ${params.description}\n\n` : ''}Analyze these video frames and return a JSON object with:
+  const imageParts = params.frames.map((frame) => {
+    const base64Data = frame.replace(/^data:image\/[a-z]+;base64,/, '');
+    return {
+      inlineData: {
+        mimeType: 'image/jpeg',
+        data: base64Data,
+      },
+    };
+  });
+
+  const prompt = `${params.description ? `Context: ${params.description}\n\n` : ''}Analyze these video frames and return a JSON object with:
 - description: brief video summary
 - keyElements: array of key visual elements
 - suggestedTopic: suggested social media post topic
 - suggestedKeywords: array of relevant keywords
 
-Return valid JSON only.`,
-          },
-        ],
-      },
+Return valid JSON only.`;
+
+  const response = await client.models.generateContent({
+    model: visionModel,
+    contents: [
+      ...imageParts,
+      { text: prompt },
     ],
+    config: {
+      maxOutputTokens: 1024,
+    },
   });
 
-  const textBlock = response.content.find((b) => b.type === 'text');
-  if (!textBlock || textBlock.type !== 'text') {
-    throw new Error('No text content in vision response');
+  const text = response.text;
+  if (!text) {
+    throw new Error('No text in Gemini vision response');
   }
 
-  const jsonMatch =
-    textBlock.text.match(/```json\s*([\s\S]*?)\s*```/) ??
-    textBlock.text.match(/```\s*([\s\S]*?)\s*```/);
-  const jsonStr = jsonMatch ? jsonMatch[1] : textBlock.text.trim();
-
-  return JSON.parse(jsonStr) as VideoAnalysis;
+  return JSON.parse(extractJson(text)) as VideoAnalysis;
 }
 
 export async function generateImagePrompt(params: {
@@ -188,22 +183,19 @@ export async function generateImagePrompt(params: {
   const client = getClient();
   const modelConfig = MODEL_CONFIGS[params.model];
 
-  const response = await client.messages.create({
-    model: modelConfig.apiId,
-    max_tokens: 256,
-    messages: [
-      {
-        role: 'user',
-        content: `Create a detailed image generation prompt for this ${params.platform} post:
+  const prompt = `Create a detailed image generation prompt for this ${params.platform} post:
 
 "${params.postContent.slice(0, 300)}"
 
-${params.style ? `Style preference: ${params.style}\n` : ''}Return only the image prompt, no explanation.`,
-      },
-    ],
+${params.style ? `Style preference: ${params.style}\n` : ''}Return only the image prompt, no explanation.`;
+
+  const response = await client.models.generateContent({
+    model: modelConfig.apiId,
+    contents: prompt,
+    config: {
+      maxOutputTokens: 256,
+    },
   });
 
-  const textBlock = response.content.find((b) => b.type === 'text');
-  if (!textBlock || textBlock.type !== 'text') return '';
-  return textBlock.text.trim();
+  return response.text?.trim() ?? '';
 }

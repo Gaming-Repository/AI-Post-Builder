@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import {
   Sparkles, Video, History, Download, Loader2,
-  ChevronDown, Zap
+  ChevronDown, Zap, Crown, Brain, Cpu
 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { toast } from '@/components/ui/toaster';
@@ -11,12 +11,17 @@ import { downloadTextFile } from '@/lib/utils';
 import PostCard from './PostCard';
 import HistoryPanel from './HistoryPanel';
 import {
-  PLATFORM_CONFIGS, MODEL_CONFIGS,
-  type Platform, type ModelId, type GeneratedPost, type SessionData, type VideoAnalysis,
+  PLATFORM_CONFIGS, MODEL_CONFIGS, PROVIDER_CONFIGS,
+  type Platform, type ModelId, type Provider, type GeneratedPost, type SessionData, type VideoAnalysis,
 } from '@/types';
 
 const PLATFORMS: Platform[] = ['twitter', 'linkedin', 'instagram', 'facebook'];
 const TONES = ['professional', 'casual', 'witty', 'inspirational', 'educational', 'promotional'];
+
+// Helper to get display name for model
+function getModelDisplayName(model: ModelId): string {
+  return MODEL_CONFIGS[model]?.name ?? model;
+}
 
 export default function PostBuilder() {
   // Form state
@@ -26,11 +31,12 @@ export default function PostBuilder() {
   const [keywordsRaw, setKeywordsRaw] = useState('');
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>(['twitter', 'linkedin']);
   const [model, setModel] = useState<ModelId>('sonnet');
+  const [selectedProvider, setSelectedProvider] = useState<Exclude<Provider, 'best'>>('anthropic');
+  const [bestModeEnabled, setBestModeEnabled] = useState(false);
 
   // Results
   const [posts, setPosts] = useState<GeneratedPost[]>([]);
   const [sessionId, setSessionId] = useState<string>('');
-  const [currentSession, setCurrentSession] = useState<Omit<SessionData, 'id' | 'timestamp' | 'postCount' | 'posts'> | null>(null);
 
   // Video
   const [videoAnalysis, setVideoAnalysis] = useState<VideoAnalysis | null>(null);
@@ -40,6 +46,9 @@ export default function PostBuilder() {
   // UI
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<SessionData[]>(() => loadHistory());
+
+  const effectiveModel: ModelId = bestModeEnabled ? 'best' : model;
+  const effectiveProvider: Provider = bestModeEnabled ? 'best' : selectedProvider;
 
   const generate = trpc.posts.generate.useMutation({
     onSuccess: (data) => {
@@ -56,15 +65,20 @@ export default function PostBuilder() {
         audience,
         keywords,
         platforms,
-        model,
+        model: effectiveModel,
+        provider: effectiveProvider,
         posts: generatedPosts,
         timestamp: data.timestamp,
         postCount: generatedPosts.length,
       };
-      setCurrentSession({ topic, tone, audience, keywords, platforms, model });
       saveSession(session);
       setHistory(loadHistory());
-      toast({ title: `${generatedPosts.length} posts generated`, description: `Model: ${MODEL_CONFIGS[model].name}` });
+      toast({ 
+        title: `${generatedPosts.length} posts generated`, 
+        description: bestModeEnabled 
+          ? 'Best Models Mode: Gemini 2.5 Pro' 
+          : `Model: ${getModelDisplayName(model)}` 
+      });
     },
     onError: (e) => toast({ title: 'Generation failed', description: e.message, variant: 'destructive' }),
   });
@@ -112,7 +126,7 @@ export default function PostBuilder() {
       audience: audience.trim() || 'general',
       keywords,
       platforms: selectedPlatforms,
-      model,
+      model: effectiveModel,
       videoAnalysis: videoAnalysis ?? undefined,
     });
   }
@@ -127,7 +141,22 @@ export default function PostBuilder() {
     setAudience(session.audience ?? '');
     setKeywordsRaw(session.keywords?.join(', ') ?? '');
     setSelectedPlatforms(session.platforms ?? []);
-    setModel(session.model ?? 'sonnet');
+    
+    // Restore model and provider state
+    if (session.model === 'best') {
+      setBestModeEnabled(true);
+      setModel('sonnet'); // default when disabling best mode
+      setSelectedProvider('anthropic');
+    } else {
+      setBestModeEnabled(false);
+      setModel(session.model ?? 'sonnet');
+      // Determine provider from model
+      const modelConfig = MODEL_CONFIGS[session.model as Exclude<ModelId, 'best'>];
+      if (modelConfig && modelConfig.provider !== 'best') {
+        setSelectedProvider(modelConfig.provider);
+      }
+    }
+    
     setPosts(session.posts ?? []);
     setSessionId(session.id);
     toast({ title: 'Session restored' });
@@ -143,7 +172,8 @@ export default function PostBuilder() {
       audience,
       keywords,
       platforms: selectedPlatforms,
-      model,
+      model: effectiveModel,
+      provider: effectiveProvider,
       posts,
       timestamp: new Date().toISOString(),
       postCount: posts.length,
@@ -259,35 +289,136 @@ export default function PostBuilder() {
               />
             </div>
 
-            {/* Model */}
+            {/* Best Models Mode Toggle */}
             <div style={{ marginBottom: '16px' }}>
-              <label className="label">Model</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                {(Object.keys(MODEL_CONFIGS) as ModelId[]).map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => setModel(m)}
-                    style={{
-                      padding: '8px 6px',
-                      borderRadius: '8px',
-                      border: model === m ? '1px solid var(--accent)' : '1px solid var(--border)',
-                      background: model === m ? 'rgba(124,106,240,0.12)' : 'var(--surface-2)',
-                      color: model === m ? 'var(--accent-bright)' : 'var(--text-muted)',
-                      cursor: 'pointer',
-                      textAlign: 'center',
-                      transition: 'all 0.15s',
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      {MODEL_CONFIGS[m].name}
-                    </div>
-                    <div style={{ fontSize: '0.62rem', marginTop: '2px', opacity: 0.7 }}>
-                      {MODEL_CONFIGS[m].description}
-                    </div>
-                  </button>
-                ))}
-              </div>
+              <button
+                onClick={() => {
+                  setBestModeEnabled(!bestModeEnabled);
+                  if (!bestModeEnabled) {
+                    setModel('best');
+                  } else {
+                    setModel('sonnet');
+                    setSelectedProvider('anthropic');
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  padding: '12px 14px',
+                  borderRadius: '10px',
+                  border: bestModeEnabled ? '1px solid #7c6af0' : '1px solid var(--border)',
+                  background: bestModeEnabled ? 'linear-gradient(135deg, rgba(124,106,240,0.15), rgba(124,106,240,0.05))' : 'var(--surface-2)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <Crown size={18} color={bestModeEnabled ? '#7c6af0' : 'var(--text-muted)'} />
+                <div style={{ flex: 1, textAlign: 'left' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.85rem', color: bestModeEnabled ? '#7c6af0' : 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    Best Models Mode
+                    {bestModeEnabled && <span style={{ fontSize: '0.7rem', padding: '2px 6px', background: 'rgba(124,106,240,0.2)', borderRadius: '4px', color: '#7c6af0' }}>ACTIVE</span>}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Auto-selects optimal AI: Gemini 2.5 Pro for posts, GPT-4o for video, GPT-4o Mini for images
+                  </div>
+                </div>
+                <div style={{
+                  width: '36px',
+                  height: '20px',
+                  borderRadius: '10px',
+                  background: bestModeEnabled ? '#7c6af0' : 'var(--border)',
+                  position: 'relative',
+                  transition: 'background 0.2s',
+                }}>
+                  <div style={{
+                    width: '16px',
+                    height: '16px',
+                    borderRadius: '50%',
+                    background: 'white',
+                    position: 'absolute',
+                    top: '2px',
+                    left: bestModeEnabled ? '18px' : '2px',
+                    transition: 'left 0.2s',
+                  }} />
+                </div>
+              </button>
             </div>
+
+            {/* Provider Tabs (hidden when Best Mode is enabled) */}
+            {!bestModeEnabled && (
+              <div style={{ marginBottom: '12px' }}>
+                <label className="label">AI Provider</label>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
+                  {(Object.keys(PROVIDER_CONFIGS) as Array<'anthropic' | 'openai' | 'gemini'>).map((provider) => {
+                    const cfg = PROVIDER_CONFIGS[provider];
+                    const isActive = selectedProvider === provider;
+                    const Icon = provider === 'anthropic' ? Brain : provider === 'openai' ? Sparkles : Cpu;
+                    return (
+                      <button
+                        key={provider}
+                        onClick={() => {
+                          setSelectedProvider(provider);
+                          // Set default model for this provider
+                          setModel(cfg.models[1] || cfg.models[0]);
+                        }}
+                        style={{
+                          flex: 1,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '10px 8px',
+                          borderRadius: '8px',
+                          border: isActive ? `1px solid ${cfg.color}` : '1px solid var(--border)',
+                          background: isActive ? `${cfg.color}15` : 'var(--surface-2)',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <Icon size={16} color={isActive ? cfg.color : 'var(--text-muted)'} />
+                        <span style={{ fontSize: '0.7rem', fontWeight: 600, color: isActive ? cfg.color : 'var(--text-muted)' }}>
+                          {cfg.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Model Grid (hidden when Best Mode is enabled) */}
+            {!bestModeEnabled && (
+              <div style={{ marginBottom: '16px' }}>
+                <label className="label">Model</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                  {PROVIDER_CONFIGS[selectedProvider].models.map((m: ModelId) => (
+                    <button
+                      key={m}
+                      onClick={() => setModel(m as Exclude<ModelId, 'best'>)}
+                      style={{
+                        padding: '8px 6px',
+                        borderRadius: '8px',
+                        border: model === m ? `1px solid ${PROVIDER_CONFIGS[selectedProvider].color}` : '1px solid var(--border)',
+                        background: model === m ? `${PROVIDER_CONFIGS[selectedProvider].color}15` : 'var(--surface-2)',
+                        color: model === m ? PROVIDER_CONFIGS[selectedProvider].color : 'var(--text-muted)',
+                        cursor: 'pointer',
+                        textAlign: 'center',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        {MODEL_CONFIGS[m as Exclude<ModelId, 'best'>].name}
+                      </div>
+                      <div style={{ fontSize: '0.62rem', marginTop: '2px', opacity: 0.7 }}>
+                        {MODEL_CONFIGS[m as Exclude<ModelId, 'best'>].description}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Platforms */}
             <div style={{ marginBottom: '20px' }}>
@@ -391,7 +522,7 @@ export default function PostBuilder() {
                     Generated Posts
                   </h2>
                   <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '2px' }}>
-                    {posts.length} posts · {currentSession?.model ?? model}
+                    {posts.length} posts · {bestModeEnabled ? 'Best Models Mode' : getModelDisplayName(model)}
                   </p>
                 </div>
                 <button className="btn btn-ghost" style={{ fontSize: '0.72rem' }} onClick={handleExportAll}>
@@ -402,7 +533,7 @@ export default function PostBuilder() {
                 <PostCard
                   key={post.platform}
                   post={post}
-                  model={model}
+                  model={effectiveModel}
                   sessionId={sessionId}
                   onUpdate={handleUpdatePost}
                   index={i}

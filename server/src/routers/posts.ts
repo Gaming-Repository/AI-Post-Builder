@@ -7,12 +7,21 @@ import {
   generatePosts,
   generateSinglePost,
   type VideoAnalysis,
-} from '../services/anthropic.js';
+} from '../services/ai.js';
 import type { Platform } from '../db/schema.js';
 import type { ModelId } from '../config/platforms.js';
 
 const platformEnum = z.enum(['twitter', 'linkedin', 'instagram', 'facebook']);
-const modelEnum = z.enum(['haiku', 'sonnet', 'opus']);
+const modelEnum = z.enum([
+  // Anthropic
+  'haiku', 'sonnet', 'opus',
+  // OpenAI
+  'gpt4o-mini', 'gpt4o', 'o3-mini',
+  // Gemini
+  'gemini-flash', 'gemini-pro',
+  // Best mode
+  'best',
+]);
 
 const videoAnalysisSchema = z.object({
   description: z.string(),
@@ -107,13 +116,18 @@ export const postsRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Session not found' });
       }
 
+      const videoAnalysis = session.videoAnalysisData
+        ? JSON.parse(session.videoAnalysisData) as VideoAnalysis
+        : undefined;
+
       const post = await generateSinglePost({
-        sessionTopic: session.topic ?? '',
-        sessionTone: session.tone ?? 'professional',
-        sessionAudience: session.audience ?? 'general',
-        sessionKeywords: session.keywords ? session.keywords.split(',').filter(Boolean) : [],
+        topic: session.topic ?? '',
+        tone: session.tone ?? 'professional',
+        audience: session.audience ?? 'general',
+        keywords: session.keywords ? session.keywords.split(',').filter(Boolean) : [],
         platform: input.platform as Platform,
-        model: input.model as ModelId,
+        model: input.model as ModelId | 'best',
+        videoAnalysis,
       });
 
       // Upsert post

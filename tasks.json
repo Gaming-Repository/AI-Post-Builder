@@ -1,32 +1,37 @@
 [
   {
-    "content": "Set up project foundation: pnpm init, install all dependencies (React 19, Vite, Express, tRPC, Drizzle, Anthropic, Tailwind 4, shadcn)",
-    "status": "completed",
-    "id": "1"
+    "id": "1",
+    "content": "[implement-1] Create unified multi-provider AI service supporting Anthropic, OpenAI, and Gemini",
+    "status": "completed"
   },
   {
-    "content": "Create database schema (Drizzle ORM) + tRPC router with posts.generate, posts.regenerate, video.analyzeVideo, image.generateImage",
-    "status": "completed",
-    "id": "2"
+    "id": "2",
+    "content": "[implement-2] Implement Best Models Mode that auto-selects optimal models per task",
+    "status": "completed"
   },
   {
-    "content": "Build frontend: PostBuilder main page, PostCard component, HistoryPanel modal with full platform/model/video support",
-    "status": "completed",
-    "id": "3"
+    "id": "3",
+    "content": "[implement-3] Update database schema and types for new model providers",
+    "status": "completed"
   },
   {
-    "content": "Integrate Claude API: multi-model post generation, video frame analysis, structured JSON schema output, image generation stub",
-    "status": "completed",
-    "id": "4"
+    "id": "4",
+    "content": "[implement-4] Update client UI with provider tabs and Best Models Mode toggle",
+    "status": "completed"
   },
   {
-    "content": "Write Vitest tests for platform configs, character limits, post generation, video analysis, metadata extraction",
-    "status": "completed",
-    "id": "5"
+    "id": "5",
+    "content": "[implement-5] Add OpenAI and Gemini API keys to .env.example",
+    "status": "completed"
   },
   {
-    "content": "Create minimal README + LICENSE, commit everything, push to GitHub",
-    "status": "in_progress",
-    "id": "6"
+    "id": "6",
+    "content": "[implement-6] Update server package.json with openai and google-genai deps",
+    "status": "completed"
+  },
+  {
+    "id": "7",
+    "content": "[implement-7] Install dependencies and run TypeScript checks",
+    "status": "in_progress"
   }
 ]

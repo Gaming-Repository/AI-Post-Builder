@@ -1,5 +1,17 @@
 export type Platform = 'twitter' | 'linkedin' | 'instagram' | 'facebook';
-export type ModelId = 'haiku' | 'sonnet' | 'opus';
+export type Provider = 'anthropic' | 'openai' | 'gemini' | 'best';
+
+// Extended ModelId includes all providers + best mode
+export type ModelId =
+  // Anthropic
+  | 'haiku' | 'sonnet' | 'opus'
+  // OpenAI
+  | 'gpt4o-mini' | 'gpt4o' | 'o3-mini'
+  // Gemini
+  | 'gemini-flash' | 'gemini-pro'
+  // Best mode auto-selection
+  | 'best';
+
 export type Sentiment = 'positive' | 'neutral' | 'negative';
 
 export interface PostMetadata {
@@ -33,6 +45,7 @@ export interface SessionData {
   keywords: string[];
   platforms: Platform[];
   model: ModelId;
+  provider: Provider;
   posts: GeneratedPost[];
   timestamp: string;
   postCount: number;
@@ -102,8 +115,118 @@ export const PLATFORM_CONFIGS: Record<Platform, PlatformConfig> = {
   },
 };
 
-export const MODEL_CONFIGS: Record<ModelId, { name: string; description: string }> = {
-  haiku: { name: 'Haiku', description: 'Fast · Cost-effective' },
-  sonnet: { name: 'Sonnet', description: 'Balanced · Default' },
-  opus: { name: 'Opus', description: 'Highest quality' },
+export interface ModelConfig {
+  name: string;
+  provider: Provider;
+  description: string;
+  speed: 'fast' | 'balanced' | 'slow';
+  quality: 'good' | 'better' | 'best';
+  costTier: 'low' | 'medium' | 'high';
+  color: string;
+}
+
+export const MODEL_CONFIGS: Record<ModelId, ModelConfig> = {
+  // Anthropic
+  haiku: {
+    name: 'Haiku',
+    provider: 'anthropic',
+    description: 'Fast · Cost-effective',
+    speed: 'fast',
+    quality: 'good',
+    costTier: 'low',
+    color: '#D4A574',
+  },
+  sonnet: {
+    name: 'Sonnet',
+    provider: 'anthropic',
+    description: 'Balanced · Default',
+    speed: 'balanced',
+    quality: 'better',
+    costTier: 'medium',
+    color: '#D4A574',
+  },
+  opus: {
+    name: 'Opus',
+    provider: 'anthropic',
+    description: 'Highest quality',
+    speed: 'slow',
+    quality: 'best',
+    costTier: 'high',
+    color: '#D4A574',
+  },
+  // OpenAI
+  'gpt4o-mini': {
+    name: 'GPT-4o Mini',
+    provider: 'openai',
+    description: 'Fast · Economical',
+    speed: 'fast',
+    quality: 'good',
+    costTier: 'low',
+    color: '#74A57D',
+  },
+  'gpt4o': {
+    name: 'GPT-4o',
+    provider: 'openai',
+    description: 'Powerful · Multimodal',
+    speed: 'balanced',
+    quality: 'better',
+    costTier: 'medium',
+    color: '#74A57D',
+  },
+  'o3-mini': {
+    name: 'o3 Mini',
+    provider: 'openai',
+    description: 'Reasoning specialist',
+    speed: 'balanced',
+    quality: 'better',
+    costTier: 'medium',
+    color: '#74A57D',
+  },
+  // Gemini
+  'gemini-flash': {
+    name: 'Gemini 2.5 Flash',
+    provider: 'gemini',
+    description: 'Fast · Experimental',
+    speed: 'fast',
+    quality: 'good',
+    costTier: 'low',
+    color: '#7494D4',
+  },
+  'gemini-pro': {
+    name: 'Gemini 2.5 Pro',
+    provider: 'gemini',
+    description: 'Most intelligent',
+    speed: 'balanced',
+    quality: 'best',
+    costTier: 'medium',
+    color: '#7494D4',
+  },
+  // Best Mode
+  best: {
+    name: 'Best Models Mode',
+    provider: 'best',
+    description: 'Auto-select optimal AI for each task',
+    speed: 'balanced',
+    quality: 'best',
+    costTier: 'medium',
+    color: '#7c6af0',
+  },
+};
+
+export const PROVIDER_CONFIGS: Record<Exclude<Provider, 'best'>, { name: string; color: string; models: ModelId[] }> = {
+  anthropic: {
+    name: 'Anthropic',
+    color: '#D4A574',
+    models: ['haiku', 'sonnet', 'opus'],
+  },
+  openai: {
+    name: 'OpenAI',
+    color: '#74A57D',
+    models: ['gpt4o-mini', 'gpt4o', 'o3-mini'],
+  },
+  gemini: {
+    name: 'Google Gemini',
+    color: '#7494D4',
+    models: ['gemini-flash', 'gemini-pro'],
+  },
 };

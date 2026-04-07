@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { PLATFORM_CONFIGS, MODEL_CONFIGS, type ModelId } from '../config/platforms.js';
 import type { Platform } from '../db/schema.js';
 import type { PostMetadata, GeneratedPost, VideoAnalysis } from './ai.js';
@@ -6,14 +6,20 @@ import type { PostMetadata, GeneratedPost, VideoAnalysis } from './ai.js';
 export type { PostMetadata, GeneratedPost, VideoAnalysis };
 
 const getClient = () =>
-  new Anthropic({
+  new OpenAI({
     apiKey:
-      process.env.WORKSH_ANTHROPIC_API_KEY ??
-      process.env.ANTHROPIC_API_KEY ??
+      process.env.WORKS2_OPENAI_API_KEY ??
+      process.env.OPENAI_API_KEY ??
       '',
   });
 
-
+// Helper to extract JSON from text
+function extractJson(text: string): string {
+  const jsonMatch =
+    text.match(/```json\s*([\s\S]*?)\s*```/) ??
+    text.match(/```\s*([\s\S]*?)\s*```/);
+  return jsonMatch ? jsonMatch[1] : text.trim();
+}
 
 export async function generatePosts(params: {
   topic: string;
@@ -23,8 +29,6 @@ export async function generatePosts(params: {
   platforms: Platform[];
   model: ModelId;
   videoAnalysis?: VideoAnalysis;
-  // For unified interface compatibility
-  previousPosts?: GeneratedPost[];
 }): Promise<GeneratedPost[]> {
   const client = getClient();
   const modelConfig = MODEL_CONFIGS[params.model];
@@ -39,6 +43,8 @@ export async function generatePosts(params: {
   const videoContext = params.videoAnalysis
     ? `\nVideo analysis context:\n- Description: ${params.videoAnalysis.description}\n- Key elements: ${params.videoAnalysis.keyElements.join(', ')}`
     : '';
+
+  const systemPrompt = `You are an expert social media strategist. Generate platform-optimized posts in valid JSON format only. Never exceed platform character limits.`;
 
   const userPrompt = `Generate social media posts for the following platforms:
 ${platformDetails}
@@ -60,31 +66,26 @@ Return a JSON object with a "posts" array. Each post must have:
 - content: the post text
 - metadata: { sentiment, keyTopics[], callToAction, hashtags[], mentions[] }`;
 
-  const response = await client.messages.create({
+  const response = await client.chat.completions.create({
     model: modelConfig.apiId,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
     max_tokens: 4096,
-    system: 'You are an expert social media strategist. Generate platform-optimized posts in valid JSON format only. Never exceed platform character limits.',
-    messages: [{ role: 'user', content: userPrompt }],
-    // @ts-expect-error – betas may not be typed yet
-    betas: ['output-128k-2025-02-19'],
+    response_format: { type: 'json_object' },
   });
 
-  const textBlock = response.content.find((b) => b.type === 'text');
-  if (!textBlock || textBlock.type !== 'text') {
-    throw new Error('No text content in Claude response');
+  const content = response.choices[0]?.message?.content;
+  if (!content) {
+    throw new Error('No content in OpenAI response');
   }
-
-  // Extract JSON from response (handle markdown code blocks)
-  const jsonMatch =
-    textBlock.text.match(/```json\s*([\s\S]*?)\s*```/) ??
-    textBlock.text.match(/```\s*([\s\S]*?)\s*```/);
-  const jsonStr = jsonMatch ? jsonMatch[1] : textBlock.text.trim();
 
   let parsed: { posts: Array<{ platform: string; content: string; metadata: PostMetadata }> };
   try {
-    parsed = JSON.parse(jsonStr);
+    parsed = JSON.parse(extractJson(content));
   } catch {
-    throw new Error(`Failed to parse Claude response as JSON: ${jsonStr.slice(0, 200)}`);
+    throw new Error(`Failed to parse OpenAI response as JSON: ${content.slice(0, 200)}`);
   }
 
   return parsed.posts
@@ -134,25 +135,25 @@ export async function analyzeVideoFrames(params: {
   const client = getClient();
   const modelConfig = MODEL_CONFIGS[params.model];
 
-  const imageContent: Anthropic.ImageBlockParam[] = params.frames.map((frame) => ({
-    type: 'image',
-    source: {
-      type: 'base64',
-      media_type: 'image/jpeg',
-      data: frame.replace(/^data:image\/[a-z]+;base64,/, ''),
+  // Fallback to gpt-4o if the specified model doesn't support vision
+  const visionModel = modelConfig.supportsVision ? modelConfig.apiId : 'gpt-4o';
+
+  const imageContent = params.frames.map((frame) => ({
+    type: 'image_url' as const,
+    image_url: {
+      url: frame.startsWith('data:') ? frame : `data:image/jpeg;base64,${frame}`,
     },
   }));
 
-  const response = await client.messages.create({
-    model: modelConfig.apiId,
-    max_tokens: 1024,
+  const response = await client.chat.completions.create({
+    model: visionModel,
     messages: [
       {
         role: 'user',
         content: [
           ...imageContent,
           {
-            type: 'text',
+            type: 'text' as const,
             text: `${params.description ? `Context: ${params.description}\n\n` : ''}Analyze these video frames and return a JSON object with:
 - description: brief video summary
 - keyElements: array of key visual elements
@@ -164,19 +165,16 @@ Return valid JSON only.`,
         ],
       },
     ],
+    max_tokens: 1024,
+    response_format: { type: 'json_object' },
   });
 
-  const textBlock = response.content.find((b) => b.type === 'text');
-  if (!textBlock || textBlock.type !== 'text') {
-    throw new Error('No text content in vision response');
+  const content = response.choices[0]?.message?.content;
+  if (!content) {
+    throw new Error('No content in OpenAI vision response');
   }
 
-  const jsonMatch =
-    textBlock.text.match(/```json\s*([\s\S]*?)\s*```/) ??
-    textBlock.text.match(/```\s*([\s\S]*?)\s*```/);
-  const jsonStr = jsonMatch ? jsonMatch[1] : textBlock.text.trim();
-
-  return JSON.parse(jsonStr) as VideoAnalysis;
+  return JSON.parse(extractJson(content)) as VideoAnalysis;
 }
 
 export async function generateImagePrompt(params: {
@@ -188,10 +186,13 @@ export async function generateImagePrompt(params: {
   const client = getClient();
   const modelConfig = MODEL_CONFIGS[params.model];
 
-  const response = await client.messages.create({
+  const response = await client.chat.completions.create({
     model: modelConfig.apiId,
-    max_tokens: 256,
     messages: [
+      {
+        role: 'system',
+        content: 'You create detailed, creative image generation prompts.',
+      },
       {
         role: 'user',
         content: `Create a detailed image generation prompt for this ${params.platform} post:
@@ -201,9 +202,8 @@ export async function generateImagePrompt(params: {
 ${params.style ? `Style preference: ${params.style}\n` : ''}Return only the image prompt, no explanation.`,
       },
     ],
+    max_tokens: 256,
   });
 
-  const textBlock = response.content.find((b) => b.type === 'text');
-  if (!textBlock || textBlock.type !== 'text') return '';
-  return textBlock.text.trim();
+  return response.choices[0]?.message?.content?.trim() ?? '';
 }
